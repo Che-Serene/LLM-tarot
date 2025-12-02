@@ -1,5 +1,5 @@
 import streamlit as st
-from langchain_ollama import OllamaEmbeddings, ChatOllama
+from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain_community.vectorstores import FAISS
 from langchain_community.docstore.in_memory import InMemoryDocstore
 from langchain.tools import tool
@@ -11,7 +11,6 @@ import os
 import json
 from langchain_core.documents import Document
 import random
-
 
 # ═════════════════════════════════════════════════════════════════
 # 📋 페이지 설정 및 커스텀 CSS
@@ -118,7 +117,6 @@ custom_css = """
 
 st.markdown(custom_css, unsafe_allow_html=True)
 
-
 # ═════════════════════════════════════════════════════════════════
 # 📦 세션 상태 초기화
 # ═════════════════════════════════════════════════════════════════
@@ -132,7 +130,6 @@ if "current_cards" not in st.session_state:
 if "current_reading" not in st.session_state:
     st.session_state.current_reading = ""
 
-
 # ═════════════════════════════════════════════════════════════════
 # 📚 타로카드 데이터 로드
 # ═════════════════════════════════════════════════════════════════
@@ -143,10 +140,8 @@ def load_tarot_data():
         tarot_data = json.load(f)
         return tarot_data["cards"]
 
-
 @st.cache_resource
 def setup_vector_store(all_cards):
-    """벡터 스토어 초기화 (캐싱됨)"""
     documents = []
     for card in all_cards:
         card_text = f"""타로카드: {card['name']}
@@ -183,18 +178,14 @@ def setup_vector_store(all_cards):
         )
         documents.append(doc)
 
-    class InstructEmbeddings(OllamaEmbeddings):
-        def embed_documents(self, texts: List[str]) -> List[List[float]]:
-            instructed_texts = [f"Represent this sentence for retrieval: {text}" for text in texts]
-            return super().embed_documents(instructed_texts)
+    # OpenAI API 키 불러오기 및 임베딩 생성
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        api_key = st.text_input("OpenAI API Key를 입력하세요:", type="password")
 
-        def embed_query(self, text: str) -> List[float]:
-            instructed_text = f"Represent this sentence for retrieval: {text}"
-            return super().embed_documents([instructed_text])[0]
-
-    embeddings = InstructEmbeddings(
-        model="jeffh/intfloat-multilingual-e5-large-instruct:q8_0",
-        base_url="http://localhost:11434"
+    embeddings = OpenAIEmbeddings(
+        model="text-embedding-3-large",
+        openai_api_key=api_key,
     )
 
     embedding_dim = len(embeddings.embed_query("test"))
@@ -210,10 +201,8 @@ def setup_vector_store(all_cards):
     vector_store.add_documents(documents)
     return vector_store
 
-
 all_cards = load_tarot_data()
 vector_store = setup_vector_store(all_cards)
-
 
 # ═════════════════════════════════════════════════════════════════
 # 🔮 LangChain Tool 정의
@@ -221,7 +210,7 @@ vector_store = setup_vector_store(all_cards)
 
 @tool(response_format="content_and_artifact")
 def retrieve_card_meaning(query: str):
-    """타로카드의 의미를 검색합니다."""
+    """문서 검색 결과를 반환"""
     retrieved_docs = vector_store.similarity_search(query, k=3)
     formatted_docs = []
     for i, doc in enumerate(retrieved_docs, 1):
@@ -236,12 +225,16 @@ def retrieve_card_meaning(query: str):
     pretty_output = "\n".join(formatted_docs)
     return pretty_output, retrieved_docs
 
-
 # ═════════════════════════════════════════════════════════════════
 # 🤖 모델 및 프롬프트 설정
 # ═════════════════════════════════════════════════════════════════
 
-model = ChatOllama(model="llama3.1:8b")
+api_key = os.environ.get("OPENAI_API_KEY")
+if not api_key:
+    api_key = st.text_input("OpenAI API Key를 입력하세요:", type="password")
+
+model = ChatOpenAI(model="gpt-4o-mini", openai_api_key=api_key)
+
 tools = [retrieve_card_meaning]
 
 system_prompt = (
@@ -252,7 +245,6 @@ system_prompt = (
     "답변은 따뜻하고 공감적인 톤으로 작성하되, 명확하고 구체적으로 전달하세요."
 )
 
-
 # ═════════════════════════════════════════════════════════════════
 # 🎨 UI 레이아웃
 # ═════════════════════════════════════════════════════════════════
@@ -261,7 +253,6 @@ st.markdown("# 🪄 타로카드 상담 챗봇")
 st.markdown("### ✨ 신비로운 카드의 메시지를 받아보세요")
 st.markdown("---")
 
-# 두 개의 컬럼으로 레이아웃 구성
 col1, col2 = st.columns([2, 1])
 
 with col1:
@@ -280,17 +271,14 @@ with col2:
         label_visibility="collapsed"
     )
 
-# 질문하기 버튼
 if st.button("🔮 타로 리딩 시작", use_container_width=True):
     if question and num_cards:
-        # 카드 뽑기
         drawn_cards = random.sample(all_cards, num_cards)
         st.session_state.current_cards = drawn_cards
 
-        # 뽑은 카드 시각화
         st.markdown("---")
         st.markdown("### 📍 뽑힌 카드")
-        
+
         card_cols = st.columns(num_cards)
         for idx, (col, card) in enumerate(zip(card_cols, drawn_cards)):
             with col:
@@ -305,7 +293,6 @@ if st.button("🔮 타로 리딩 시작", use_container_width=True):
                 </div>
                 """, unsafe_allow_html=True)
 
-        # 타로 리딩 진행
         st.markdown("---")
         st.markdown("### 🔍 타로 리딩")
 
@@ -353,24 +340,18 @@ if st.button("🔮 타로 리딩 시작", use_container_width=True):
         except Exception as e:
             st.error(f"⚠️ 오류가 발생했습니다: {str(e)}")
 
-
-# ═════════════════════════════════════════════════════════════════
-# 📜 대화 기록
-# ═════════════════════════════════════════════════════════════════
-
 if st.session_state.chat_history:
     st.markdown("---")
     st.markdown("## 🧾 이전 상담 기록")
-    
-    # 탭 인터페이스로 각 상담 기록 표시
+
     tabs = st.tabs([f"상담 {len(st.session_state.chat_history) - i}" 
                      for i in range(len(st.session_state.chat_history))])
-    
+
     for tab, history in zip(tabs, reversed(st.session_state.chat_history)):
         with tab:
             st.markdown(f"**🙋‍♂️ 질문:**")
             st.info(history["question"])
-            
+
             st.markdown(f"**🃏 뽑힌 카드:**")
             card_cols = st.columns(len(history["cards"]))
             for col, card in zip(card_cols, history["cards"]):
@@ -382,40 +363,35 @@ if st.session_state.chat_history:
                         <p style="font-size: 0.9em;">{', '.join(keywords)}</p>
                     </div>
                     """, unsafe_allow_html=True)
-            
+
             st.markdown(f"**🤖 AI 리딩:**")
             st.markdown(history["reading"])
-            
-            # 이 상담 제거 버튼
+
             if st.button(f"🗑️ 이 상담 기록 삭제", key=f"delete_{st.session_state.chat_history.index(history)}"):
                 st.session_state.chat_history.remove(history)
-                st.rerun()
-
-
-# ═════════════════════════════════════════════════════════════════
-# 🧹 사이드바 옵션
-# ═════════════════════════════════════════════════════════════════
+                st.experimental_rerun()
 
 with st.sidebar:
     st.markdown("### ⚙️ 설정")
-    
+
     if st.button("🗑️ 모든 기록 초기화"):
         st.session_state.chat_history = []
         st.session_state.current_cards = []
         st.session_state.current_reading = ""
-        st.rerun()
-    
+        st.experimental_rerun()
+
     st.markdown("---")
     st.markdown("### 📌 안내")
     st.info("""
     **이 앱의 사용 방법:**
-    
+
     1. 💭 고민이나 질문을 입력하세요
     2. 🎴 카드 장수를 선택합니다 (1장 또는 3장)
     3. 🔮 타로 리딩 시작 버튼을 클릭합니다
     4. 🧾 이전 상담 기록을 언제든지 확인할 수 있습니다
-    
+
     **주의사항:**
     - 이 서비스는 오락 목적입니다
     - 중요한 결정은 전문가 상담을 받으세요
     """)
+
